@@ -214,6 +214,7 @@ int main( int argc, char** argv )
 
 
 	cv::Mat image = cv::Mat(h,w,CV_8U);
+	cv::Mat imageBGR[3] = {cv::Mat(h,w,CV_8U), cv::Mat(h,w,CV_8U), cv::Mat(h,w,CV_8U)};
 	int runningIDX=0;
 	float fakeTimeStamp = 0;
 
@@ -221,7 +222,45 @@ int main( int argc, char** argv )
 
 	for(unsigned int i=0;i<files.size();i++)
 	{
+		std::cout << "Reading " << files[i] << "\n";
+
+		// Read grayscale image
 		cv::Mat imageDist = cv::imread(files[i], CV_LOAD_IMAGE_GRAYSCALE);
+
+		// Read color image
+		cv::Mat src = cv::imread(files[i], CV_LOAD_IMAGE_COLOR);
+		assert(src.type() == CV_8UC3);
+
+		// Convert to HSV!
+		cv::Mat srcHSV;
+		cvtColor(src, srcHSV, CV_BGR2HSV);
+		assert(src.type() == CV_8UC3);
+
+
+		// Split BGR
+		cv::Mat imageDistBGR[3];
+		split(src,imageDistBGR);
+
+		// Split HSV
+		cv::Mat imageDistHSV[3];
+		split(srcHSV,imageDistHSV);
+
+		imageDistHSV[2] = Mat(imageDistHSV.rows, imageDistHSV.cols, CV_8UC1, 200); //Set V to 200
+
+		//Merge channels
+		merge(imageDistHSV, 3, srcHSV);
+		cv::imshow("src", srcHSV);
+
+
+		// cv::imshow("src", src);
+		// Show BGR
+		// cv::imshow("B", imageDistBGR[0]);
+		// cv::imshow("G", imageDistBGR[1]);
+		// cv::imshow("R", imageDistBGR[2]);
+		// Show HSV
+		// cv::imshow("H", imageDistHSV[0]);
+		// cv::imshow("S", imageDistHSV[1]);
+		// cv::imshow("V", imageDistHSV[2]);
 
 		if(imageDist.rows != h_inp || imageDist.cols != w_inp)
 		{
@@ -233,10 +272,27 @@ int main( int argc, char** argv )
 						w,h,imageDist.cols, imageDist.rows);
 			continue;
 		}
-		assert(imageDist.type() == CV_8U);
 
+		// Undistort gray image
+		assert(imageDist.type() == CV_8U);
+		
 		undistorter->undistort(imageDist, image);
+
 		assert(image.type() == CV_8U);
+
+
+		// Undistort color images
+		assert(imageDistBGR[0].type() == CV_8U);
+		assert(imageDistBGR[1].type() == CV_8U);
+		assert(imageDistBGR[2].type() == CV_8U);
+
+		undistorter->undistort(imageDistBGR[0], imageBGR[0]);
+		undistorter->undistort(imageDistBGR[1], imageBGR[1]);
+		undistorter->undistort(imageDistBGR[2], imageBGR[2]);
+
+		assert(imageBGR[0].type() == CV_8U);
+		assert(imageBGR[1].type() == CV_8U);
+		assert(imageBGR[2].type() == CV_8U);
 
 		if(runningIDX == 0)
 			system->randomInit(image.data, fakeTimeStamp, runningIDX);
