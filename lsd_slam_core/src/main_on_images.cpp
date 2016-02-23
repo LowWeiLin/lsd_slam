@@ -242,14 +242,14 @@ int main( int argc, char** argv )
 		split(src,imageDistBGR);
 
 		// Split HSV
-		cv::Mat imageDistHSV[3];
-		split(srcHSV,imageDistHSV);
+		//cv::Mat imageDistHSV[3];
+		//split(srcHSV,imageDistHSV);
 
-		imageDistHSV[2] = Mat(imageDistHSV.rows, imageDistHSV.cols, CV_8UC1, 200); //Set V to 200
+		//imageDistHSV[2] = cv::Mat(imageDistHSV[2].rows, imageDistHSV[2].cols, CV_8UC1, 127); //Set V to 127
 
 		//Merge channels
-		merge(imageDistHSV, 3, srcHSV);
-		cv::imshow("src", srcHSV);
+		//merge(imageDistHSV, 3, srcHSV);
+		//cv::imshow("srcHSV", srcHSV);
 
 
 		// cv::imshow("src", src);
@@ -261,6 +261,7 @@ int main( int argc, char** argv )
 		// cv::imshow("H", imageDistHSV[0]);
 		// cv::imshow("S", imageDistHSV[1]);
 		// cv::imshow("V", imageDistHSV[2]);
+
 
 		if(imageDist.rows != h_inp || imageDist.cols != w_inp)
 		{
@@ -295,9 +296,16 @@ int main( int argc, char** argv )
 		assert(imageBGR[2].type() == CV_8U);
 
 		if(runningIDX == 0)
-			system->randomInit(image.data, fakeTimeStamp, runningIDX);
+		{
+			uchar* imageBGR[3] = {imageDistBGR[0].data, imageDistBGR[1].data, imageDistBGR[2].data};
+			system->randomInit(image.data, fakeTimeStamp, runningIDX, imageBGR);
+		}
 		else
-			system->trackFrame(image.data, runningIDX ,hz == 0,fakeTimeStamp);
+		{
+			// TODO: Add in color information, pixels to ignore.
+			uchar* imageBGR[3] = {imageDistBGR[0].data, imageDistBGR[1].data, imageDistBGR[2].data};
+			system->trackFrame(image.data, runningIDX , hz == 0, fakeTimeStamp, imageBGR);
+		}
 		runningIDX++;
 		fakeTimeStamp+=0.03;
 

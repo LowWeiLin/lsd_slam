@@ -32,7 +32,8 @@ int privateFrameAllocCount = 0;
 
 
 
-Frame::Frame(int id, int width, int height, const Eigen::Matrix3f& K, double timestamp, const unsigned char* image)
+Frame::Frame(int id, int width, int height, const Eigen::Matrix3f& K, double timestamp, const unsigned char* image,
+			 unsigned char** imageBGR)
 {
 	initialize(id, width, height, K, timestamp);
 	
@@ -45,7 +46,40 @@ Frame::Frame(int id, int width, int height, const Eigen::Matrix3f& K, double tim
 		image++;
 	}
 
+
 	data.imageValid[0] = true;
+
+
+	// Set BGR
+	if(imageBGR != 0)
+	{
+		data.imageR[0] = FrameMemory::getInstance().getFloatBuffer(data.width[0]*data.height[0]);
+		data.imageG[0] = FrameMemory::getInstance().getFloatBuffer(data.width[0]*data.height[0]);
+		data.imageB[0] = FrameMemory::getInstance().getFloatBuffer(data.width[0]*data.height[0]);
+
+		float* maxPtR = data.imageR[0] + data.width[0]*data.height[0];
+		float* maxPtG = data.imageG[0] + data.width[0]*data.height[0];
+		float* maxPtB = data.imageB[0] + data.width[0]*data.height[0];
+
+
+		for(float* pt = data.imageR[0]; pt < maxPtR; pt++)
+		{
+			*pt = *imageBGR[2];
+			imageBGR[2]++;
+		}
+		for(float* pt = data.imageG[0]; pt < maxPtG; pt++)
+		{
+			*pt = *imageBGR[1];
+			imageBGR[1]++;
+		}
+		for(float* pt = data.imageB[0]; pt < maxPtB; pt++)
+		{
+			*pt = *imageBGR[0];
+			imageBGR[0]++;
+		}
+	}
+
+
 
 	privateFrameAllocCount++;
 
@@ -83,6 +117,11 @@ Frame::~Frame()
 	for (int level = 0; level < PYRAMID_LEVELS; ++ level)
 	{
 		FrameMemory::getInstance().returnBuffer(data.image[level]);
+
+		FrameMemory::getInstance().returnBuffer(data.imageR[level]);
+		FrameMemory::getInstance().returnBuffer(data.imageG[level]);
+		FrameMemory::getInstance().returnBuffer(data.imageB[level]);
+
 		FrameMemory::getInstance().returnBuffer(reinterpret_cast<float*>(data.gradients[level]));
 		FrameMemory::getInstance().returnBuffer(data.maxGradients[level]);
 		FrameMemory::getInstance().returnBuffer(data.idepth[level]);
@@ -434,6 +473,11 @@ void Frame::initialize(int id, int width, int height, const Eigen::Matrix3f& K, 
 		data.idepthVarValid[level] = false;
 
 		data.image[level] = 0;
+		data.imageR[level] = 0;
+		data.imageG[level] = 0;
+		data.imageB[level] = 0;
+
+
 		data.gradients[level] = 0;
 		data.maxGradients[level] = 0;
 		data.idepth[level] = 0;
@@ -513,106 +557,28 @@ void Frame::buildImage(int level)
 		data.image[level] = FrameMemory::getInstance().getFloatBuffer(data.width[level] * data.height[level]);
 	float* dest = data.image[level];
 
-#if defined(ENABLE_SSE)
-	// I assume all all subsampled width's are a multiple of 8.
-	// if this is not the case, this still works except for the last * pixel, which will produce a segfault.
-	// in that case, reduce this loop and calculate the last 0-3 dest pixels by hand....
-	if (width % 8 == 0)
-	{
-		__m128 p025 = _mm_setr_ps(0.25f,0.25f,0.25f,0.25f);
 
-		const float* maxY = source+width*height;
-		for(const float* y = source; y < maxY; y+=width*2)
-		{
-			const float* maxX = y+width;
-			for(const float* x=y; x < maxX; x += 8)
-			{
-				// i am calculating four dest pixels at a time.
+	const float* sourceR = data.imageR[level - 1];
+	if (data.imageR[level] == 0)
+		data.imageR[level] = FrameMemory::getInstance().getFloatBuffer(data.width[level] * data.height[level]);
+	float* destR = data.imageR[level];
 
-				__m128 top_left = _mm_load_ps((float*)x);
-				__m128 bot_left = _mm_load_ps((float*)x+width);
-				__m128 left = _mm_add_ps(top_left,bot_left);
+	const float* sourceG = data.imageG[level - 1];
+	if (data.imageG[level] == 0)
+		data.imageG[level] = FrameMemory::getInstance().getFloatBuffer(data.width[level] * data.height[level]);
+	float* destG = data.imageG[level];
 
-				__m128 top_right = _mm_load_ps((float*)x+4);
-				__m128 bot_right = _mm_load_ps((float*)x+width+4);
-				__m128 right = _mm_add_ps(top_right,bot_right);
+	const float* sourceB = data.imageB[level - 1];
+	if (data.imageB[level] == 0)
+		data.imageB[level] = FrameMemory::getInstance().getFloatBuffer(data.width[level] * data.height[level]);
+	float* destB = data.imageB[level];
 
-				__m128 sumA = _mm_shuffle_ps(left,right, _MM_SHUFFLE(2,0,2,0));
-				__m128 sumB = _mm_shuffle_ps(left,right, _MM_SHUFFLE(3,1,3,1));
-
-				__m128 sum = _mm_add_ps(sumA,sumB);
-				sum = _mm_mul_ps(sum,p025);
-
-				_mm_store_ps(dest, sum);
-				dest += 4;
-			}
-		}
-
-		data.imageValid[level] = true;
-		return;
-	}
-#elif defined(ENABLE_NEON)
-	// I assume all all subsampled width's are a multiple of 8.
-	// if this is not the case, this still works except for the last * pixel, which will produce a segfault.
-	// in that case, reduce this loop and calculate the last 0-3 dest pixels by hand....
-	if (width % 8 == 0)
-	{
-		static const float p025[] = {0.25, 0.25, 0.25, 0.25};
-		int width_iteration_count = width / 8;
-		int height_iteration_count = height / 2;
-		const float* cur_px = source;
-		const float* next_row_px = source + width;
-		
-		__asm__ __volatile__
-		(
-			"vldmia %[p025], {q10}                        \n\t" // p025(q10)
-			
-			".height_loop:                                \n\t"
-			
-				"mov r5, %[width_iteration_count]             \n\t" // store width_iteration_count
-				".width_loop:                                 \n\t"
-				
-					"vldmia   %[cur_px]!, {q0-q1}             \n\t" // top_left(q0), top_right(q1)
-					"vldmia   %[next_row_px]!, {q2-q3}        \n\t" // bottom_left(q2), bottom_right(q3)
-		
-					"vadd.f32 q0, q0, q2                      \n\t" // left(q0)
-					"vadd.f32 q1, q1, q3                      \n\t" // right(q1)
-		
-					"vpadd.f32 d0, d0, d1                     \n\t" // pairwise add into sum(q0)
-					"vpadd.f32 d1, d2, d3                     \n\t"
-					"vmul.f32 q0, q0, q10                     \n\t" // multiply with 0.25 to get average
-					
-					"vstmia %[dest]!, {q0}                    \n\t"
-				
-				"subs     %[width_iteration_count], %[width_iteration_count], #1 \n\t"
-				"bne      .width_loop                     \n\t"
-				"mov      %[width_iteration_count], r5    \n\t" // restore width_iteration_count
-				
-				// Advance one more line
-				"add      %[cur_px], %[cur_px], %[rowSize]    \n\t"
-				"add      %[next_row_px], %[next_row_px], %[rowSize] \n\t"
-			
-			"subs     %[height_iteration_count], %[height_iteration_count], #1 \n\t"
-			"bne      .height_loop                       \n\t"
-
-			: /* outputs */ [cur_px]"+&r"(cur_px),
-							[next_row_px]"+&r"(next_row_px),
-							[width_iteration_count]"+&r"(width_iteration_count),
-							[height_iteration_count]"+&r"(height_iteration_count),
-							[dest]"+&r"(dest)
-			: /* inputs  */ [p025]"r"(p025),
-							[rowSize]"r"(width * sizeof(float))
-			: /* clobber */ "memory", "cc", "r5",
-							"q0", "q1", "q2", "q3", "q10"
-		);
-
-		data.imageValid[level] = true;
-		return;
-	}
-#endif
 
 	int wh = width*height;
 	const float* s;
+	const float* sR;
+	const float* sG;
+	const float* sB;
 	for(int y=0;y<wh;y+=width*2)
 	{
 		for(int x=0;x<width;x+=2)
@@ -623,6 +589,27 @@ void Frame::buildImage(int level)
 					s[width] +
 					s[1+width]) * 0.25f;
 			dest++;
+
+			sR = sourceR + x + y;
+			*destR = (sR[0] +
+					sR[1] +
+					sR[width] +
+					sR[1+width]) * 0.25f;
+			destR++;
+
+			sG = sourceG + x + y;
+			*destG = (sG[0] +
+					sG[1] +
+					sG[width] +
+					sG[1+width]) * 0.25f;
+			destG++;
+
+			sB = sourceB + x + y;
+			*destB = (sB[0] +
+					sB[1] +
+					sB[width] +
+					sB[1+width]) * 0.25f;
+			destB++;
 		}
 	}
 
@@ -638,6 +625,13 @@ void Frame::releaseImage(int level)
 	}
 	FrameMemory::getInstance().returnBuffer(data.image[level]);
 	data.image[level] = 0;
+
+	FrameMemory::getInstance().returnBuffer(data.imageR[level]);
+	data.imageR[level] = 0;
+	FrameMemory::getInstance().returnBuffer(data.imageG[level]);
+	data.imageG[level] = 0;
+	FrameMemory::getInstance().returnBuffer(data.imageB[level]);
+	data.imageB[level] = 0;
 }
 
 void Frame::buildGradients(int level)
