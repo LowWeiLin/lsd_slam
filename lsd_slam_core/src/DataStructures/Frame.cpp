@@ -33,7 +33,7 @@ int privateFrameAllocCount = 0;
 
 
 Frame::Frame(int id, int width, int height, const Eigen::Matrix3f& K, double timestamp, const unsigned char* image,
-			 unsigned char** imageBGR)
+			 unsigned char** imageBGR, const unsigned char* gradMask)
 {
 	initialize(id, width, height, K, timestamp);
 	
@@ -48,6 +48,16 @@ Frame::Frame(int id, int width, int height, const Eigen::Matrix3f& K, double tim
 
 
 	data.imageValid[0] = true;
+
+	// Set gradMask
+	data.gradMask[0] = FrameMemory::getInstance().getFloatBuffer(data.width[0]*data.height[0]);
+	float* maxPtGrad = data.gradMask[0] + data.width[0]*data.height[0];
+
+	for(float* pt = data.gradMask[0]; pt < maxPtGrad; pt++)
+	{
+		*pt = *gradMask;
+		gradMask++;
+	}
 
 
 	// Set BGR
@@ -117,6 +127,8 @@ Frame::~Frame()
 	for (int level = 0; level < PYRAMID_LEVELS; ++ level)
 	{
 		FrameMemory::getInstance().returnBuffer(data.image[level]);
+
+		FrameMemory::getInstance().returnBuffer(data.gradMask[level]);
 
 		FrameMemory::getInstance().returnBuffer(data.imageR[level]);
 		FrameMemory::getInstance().returnBuffer(data.imageG[level]);
@@ -473,6 +485,9 @@ void Frame::initialize(int id, int width, int height, const Eigen::Matrix3f& K, 
 		data.idepthVarValid[level] = false;
 
 		data.image[level] = 0;
+
+		data.gradMask[level] = 0;
+
 		data.imageR[level] = 0;
 		data.imageG[level] = 0;
 		data.imageB[level] = 0;
@@ -557,7 +572,13 @@ void Frame::buildImage(int level)
 		data.image[level] = FrameMemory::getInstance().getFloatBuffer(data.width[level] * data.height[level]);
 	float* dest = data.image[level];
 
+	// Grad Mask	
+	const float* sourceMask = data.gradMask[level - 1];
+	if (data.gradMask[level] == 0)
+		data.gradMask[level] = FrameMemory::getInstance().getFloatBuffer(data.width[level] * data.height[level]);
+	float* destMask= data.gradMask[level];
 
+	// RGB
 	const float* sourceR = data.imageR[level - 1];
 	if (data.imageR[level] == 0)
 		data.imageR[level] = FrameMemory::getInstance().getFloatBuffer(data.width[level] * data.height[level]);
@@ -576,6 +597,7 @@ void Frame::buildImage(int level)
 
 	int wh = width*height;
 	const float* s;
+	const float* sMask;
 	const float* sR;
 	const float* sG;
 	const float* sB;
@@ -590,6 +612,15 @@ void Frame::buildImage(int level)
 					s[1+width]) * 0.25f;
 			dest++;
 
+			// Grad Mask
+			sMask = sourceMask + x + y;
+			*destMask = (sMask[0] +
+						sMask[1] +
+						sMask[width] +
+						sMask[1+width]) * 0.25f;
+			destMask++;
+
+			// RGB
 			sR = sourceR + x + y;
 			*destR = (sR[0] +
 					sR[1] +
@@ -625,6 +656,10 @@ void Frame::releaseImage(int level)
 	}
 	FrameMemory::getInstance().returnBuffer(data.image[level]);
 	data.image[level] = 0;
+
+
+	FrameMemory::getInstance().returnBuffer(data.gradMask[level]);
+	data.gradMask[level] = 0;
 
 	FrameMemory::getInstance().returnBuffer(data.imageR[level]);
 	data.imageR[level] = 0;
@@ -704,11 +739,22 @@ void Frame::buildMaxGradients(int level)
 	float* maxgrad_pt = data.maxGradients[level] + width;
 	float* maxgrad_pt_max = data.maxGradients[level] + width*(height-1);
 
-	for(; maxgrad_pt < maxgrad_pt_max; maxgrad_pt++, gradxyii_pt++)
+	// Mask to apply on gradients.
+	float* gradMask_pt = data.gradMask[level] + width;
+
+	for(; maxgrad_pt < maxgrad_pt_max; maxgrad_pt++, gradxyii_pt++, gradMask_pt++)
 	{
-		float dx = *((float*)gradxyii_pt);
-		float dy = *(1+(float*)gradxyii_pt);
-		*maxgrad_pt = sqrtf(dx*dx + dy*dy);
+		// If mask != 0, set gradient to 0.
+		if ((*gradMask_pt) != 0)
+		{
+			*maxgrad_pt = 0;
+		}
+		else
+		{
+			float dx = *((float*)gradxyii_pt);
+			float dy = *(1+(float*)gradxyii_pt);
+			*maxgrad_pt = sqrtf(dx*dx + dy*dy);
+		}
 	}
 
 	// 2. smear up/down direction into temp buffer

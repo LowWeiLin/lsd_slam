@@ -73,7 +73,7 @@ public:
 	SlamSystem& operator=(const SlamSystem&) = delete;
 	~SlamSystem();
 
-	void randomInit(uchar* image, double timeStamp, int id, uchar** imageBGR);
+	void randomInit(uchar* image, double timeStamp, int id, uchar** imageBGR, uchar* gradMask);
 	void gtDepthInit(uchar* image, float* depth, double timeStamp, int id, uchar** imageBGR);
 
 	
@@ -83,7 +83,7 @@ public:
 	// returns camToWord transformation of the tracked frame.
 	// frameID needs to be monotonically increasing.
 	void trackFrame(uchar* image, unsigned int frameID, bool blockUntilMapped, double timestamp,
-					uchar** imageBGR);
+					uchar** imageBGR, uchar* gradMask);
 
 	// finalizes the system, i.e. blocks and does all remaining loop-closures etc.
 	void finalize();

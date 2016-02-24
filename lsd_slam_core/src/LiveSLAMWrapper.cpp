@@ -130,14 +130,16 @@ void LiveSLAMWrapper::newImageCallback(const cv::Mat& img, Timestamp imgTime)
 	if(!isInitialized)
 	{
 		uchar* imageBGR[3] = {grayImg.data, grayImg.data, grayImg.data};
-		monoOdometry->randomInit(grayImg.data, imgTime.toSec(), 1, imageBGR);
+		uchar* gradMask = 0;
+		monoOdometry->randomInit(grayImg.data, imgTime.toSec(), 1, imageBGR, gradMask);
 		isInitialized = true;
 	}
 	else if(isInitialized && monoOdometry != nullptr)
 	{
 		// TODO: Get color image
 		uchar* imageBGR[3] = {grayImg.data, grayImg.data, grayImg.data};
-		monoOdometry->trackFrame(grayImg.data,imageSeqNumber,false,imgTime.toSec(), imageBGR);
+		uchar* gradMask = 0;
+		monoOdometry->trackFrame(grayImg.data,imageSeqNumber,false,imgTime.toSec(), imageBGR, gradMask);
 	}
 }
 

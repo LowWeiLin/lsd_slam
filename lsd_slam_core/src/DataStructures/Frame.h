@@ -46,7 +46,7 @@ public:
 
 
 	Frame(int id, int width, int height, const Eigen::Matrix3f& K, double timestamp, const unsigned char* image,
-		  unsigned char** imageBGR);
+		  unsigned char** imageBGR, const unsigned char* gradMask);
 
 	Frame(int id, int width, int height, const Eigen::Matrix3f& K, double timestamp, const float* image);
 
@@ -101,6 +101,7 @@ public:
 	inline double timestamp() const;
 	
 	inline float* image(int level = 0);
+	inline float* gradMask(int level = 0);
 	inline float* imageR(int level = 0);
 	inline float* imageG(int level = 0);
 	inline float* imageB(int level = 0);
@@ -250,6 +251,8 @@ private:
 		float* imageG[PYRAMID_LEVELS];
 		float* imageB[PYRAMID_LEVELS];
 		bool imageValid[PYRAMID_LEVELS];
+
+		float* gradMask[PYRAMID_LEVELS];
 		
 		Eigen::Vector4f* gradients[PYRAMID_LEVELS];
 		bool gradientsValid[PYRAMID_LEVELS];
@@ -366,6 +369,12 @@ inline float* Frame::image(int level)
 	if (! data.imageValid[level])
 		require(IMAGE, level);
 	return data.image[level];
+}
+inline float* Frame::gradMask(int level)
+{
+	if (! data.imageValid[level])
+		require(IMAGE, level);
+	return data.gradMask[level];
 }
 inline float* Frame::imageR(int level)
 {

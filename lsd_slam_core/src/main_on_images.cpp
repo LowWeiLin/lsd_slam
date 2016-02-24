@@ -215,8 +215,16 @@ int main( int argc, char** argv )
 
 	cv::Mat image = cv::Mat(h,w,CV_8U);
 	cv::Mat imageBGR[3] = {cv::Mat(h,w,CV_8U), cv::Mat(h,w,CV_8U), cv::Mat(h,w,CV_8U)};
+	cv::Mat gradMask = cv::Mat(h,w,CV_8U);
 	int runningIDX=0;
 	float fakeTimeStamp = 0;
+
+
+	int thresh = 20;
+	int dilation_size = 5;
+	cv::Mat element = getStructuringElement(cv::MORPH_ELLIPSE,
+			cv::Size(2 * dilation_size + 1, 2 * dilation_size + 1),
+			cv::Point(dilation_size, dilation_size));
 
 	ros::Rate r(hz);
 
@@ -241,26 +249,28 @@ int main( int argc, char** argv )
 		cv::Mat imageDistBGR[3];
 		split(src,imageDistBGR);
 
-		// Split HSV
-		//cv::Mat imageDistHSV[3];
-		//split(srcHSV,imageDistHSV);
+		// Split HSV channels
+		cv::Mat imageDistHSV[3];
+		split(srcHSV,imageDistHSV);
 
-		//imageDistHSV[2] = cv::Mat(imageDistHSV[2].rows, imageDistHSV[2].cols, CV_8UC1, 127); //Set V to 127
 
+		cv::Mat result;
+
+		cv::threshold(imageDistHSV[2], imageDistHSV[2], 255-thresh, 255, cv::THRESH_BINARY); // Binary, 1 = bright
+		cv::threshold(imageDistHSV[1], imageDistHSV[1], thresh, 255, cv::THRESH_BINARY_INV); // Binary, 1 = bright
+		cv::bitwise_and(imageDistHSV[1], imageDistHSV[2], imageDistHSV[0]);// Binary, 1 = bright
+
+		// Increase size of masked area
+		cv::dilate(imageDistHSV[0], imageDistHSV[0], element);
+		
 		//Merge channels
 		//merge(imageDistHSV, 3, srcHSV);
 		//cv::imshow("srcHSV", srcHSV);
 
-
-		// cv::imshow("src", src);
-		// Show BGR
-		// cv::imshow("B", imageDistBGR[0]);
-		// cv::imshow("G", imageDistBGR[1]);
-		// cv::imshow("R", imageDistBGR[2]);
-		// Show HSV
-		// cv::imshow("H", imageDistHSV[0]);
-		// cv::imshow("S", imageDistHSV[1]);
-		// cv::imshow("V", imageDistHSV[2]);
+		// Show original frame
+		cv::imshow("src", src);
+		// Show gradient mask
+		cv::imshow("mask", imageDistHSV[0]);
 
 
 		if(imageDist.rows != h_inp || imageDist.cols != w_inp)
@@ -276,35 +286,36 @@ int main( int argc, char** argv )
 
 		// Undistort gray image
 		assert(imageDist.type() == CV_8U);
-		
 		undistorter->undistort(imageDist, image);
-
 		assert(image.type() == CV_8U);
-
 
 		// Undistort color images
 		assert(imageDistBGR[0].type() == CV_8U);
 		assert(imageDistBGR[1].type() == CV_8U);
 		assert(imageDistBGR[2].type() == CV_8U);
-
 		undistorter->undistort(imageDistBGR[0], imageBGR[0]);
 		undistorter->undistort(imageDistBGR[1], imageBGR[1]);
 		undistorter->undistort(imageDistBGR[2], imageBGR[2]);
-
 		assert(imageBGR[0].type() == CV_8U);
 		assert(imageBGR[1].type() == CV_8U);
 		assert(imageBGR[2].type() == CV_8U);
 
+		// Undistort gradient mask
+		assert(imageDistHSV[0].type() == CV_8U);
+		undistorter->undistort(imageDistHSV[0], gradMask);
+		assert(gradMask.type() == CV_8U);
+
+
 		if(runningIDX == 0)
 		{
 			uchar* imageBGR[3] = {imageDistBGR[0].data, imageDistBGR[1].data, imageDistBGR[2].data};
-			system->randomInit(image.data, fakeTimeStamp, runningIDX, imageBGR);
+			system->randomInit(image.data, fakeTimeStamp, runningIDX, imageBGR, gradMask.data);
 		}
 		else
 		{
-			// TODO: Add in color information, pixels to ignore.
+			// TODO: Add in pixels to ignore.
 			uchar* imageBGR[3] = {imageDistBGR[0].data, imageDistBGR[1].data, imageDistBGR[2].data};
-			system->trackFrame(image.data, runningIDX , hz == 0, fakeTimeStamp, imageBGR);
+			system->trackFrame(image.data, runningIDX , hz == 0, fakeTimeStamp, imageBGR, gradMask.data);
 		}
 		runningIDX++;
 		fakeTimeStamp+=0.03;
